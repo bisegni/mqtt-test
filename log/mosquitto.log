@@ -1,0 +1,71 @@
+1643306711: mosquitto version 2.0.14 starting
+1643306711: Config loaded from /mosquitto/config/mosquitto.conf.
+1643306711: Opening ipv4 listen socket on port 1883.
+1643306711: Opening ipv6 listen socket on port 1883.
+1643306711: mosquitto version 2.0.14 running
+1643306732: mosquitto version 2.0.14 terminating
+1643306732: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1643307515: mosquitto version 2.0.14 starting
+1643307515: Config loaded from /mosquitto/config/mosquitto.conf.
+1643307515: Opening ipv4 listen socket on port 1883.
+1643307515: Opening ipv6 listen socket on port 1883.
+1643307515: mosquitto version 2.0.14 running
+1643307535: New connection from 172.19.0.1:61742 on port 1883.
+1643307535: Client auto-1389B5CE-E1A1-2CD0-7F34-42210A549357 disconnected, not authorised.
+1643307536: New connection from 172.19.0.1:61744 on port 1883.
+1643307536: Client auto-5840C14F-4AE1-4636-88A3-B549EF941480 disconnected, not authorised.
+1643307538: New connection from 172.19.0.1:61746 on port 1883.
+1643307538: Client auto-F82659B8-4361-012F-149A-FCD1E07CAB37 disconnected, not authorised.
+1643307539: New connection from 172.19.0.1:61748 on port 1883.
+1643307539: Client auto-7E5170DC-F6B7-087F-F7CE-F9834EF6C6B3 disconnected, not authorised.
+1643307541: New connection from 172.19.0.1:61750 on port 1883.
+1643307541: Client auto-ADB01D21-C09D-647A-27D4-3BB41A3322B8 disconnected, not authorised.
+1643307543: New connection from 172.19.0.1:61752 on port 1883.
+1643307543: Client auto-71E4F63E-BC10-6351-F91C-C429206F5B26 disconnected, not authorised.
+1643307545: New connection from 172.19.0.1:61754 on port 1883.
+1643307545: Client auto-834EF812-47B5-B364-BE8C-8DDD356CDD72 disconnected, not authorised.
+1643307665: mosquitto version 2.0.14 terminating
+1643307665: Saving in-memory database to /mosquitto/data//mosquitto.db.
+1643307670: mosquitto version 2.0.14 starting
+1643307670: Config loaded from /mosquitto/config/mosquitto.conf.
+1643307670: Opening ipv4 listen socket on port 1883.
+1643307670: Opening ipv6 listen socket on port 1883.
+1643307670: mosquitto version 2.0.14 running
+1643307693: New connection from 172.19.0.1:61756 on port 1883.
+1643307693: New client connected from 172.19.0.1:61756 as auto-3FAC5196-02C2-E96F-FAA6-34566FE230E8 (p5, c1, k10).
+1643307693: Client auto-3FAC5196-02C2-E96F-FAA6-34566FE230E8 disconnected due to malformed packet.
+1643307694: New connection from 172.19.0.1:61758 on port 1883.
+1643307694: New client connected from 172.19.0.1:61758 as auto-482E9C9B-A028-E221-B69E-141BB5A400D9 (p5, c1, k10).
+1643307694: Client auto-482E9C9B-A028-E221-B69E-141BB5A400D9 disconnected due to malformed packet.
+1643307695: New connection from 172.19.0.1:61760 on port 1883.
+1643307695: New client connected from 172.19.0.1:61760 as auto-F99FC0AB-2F61-D9C6-F04B-DBBBD1675AB8 (p5, c1, k10).
+1643307695: Client auto-F99FC0AB-2F61-D9C6-F04B-DBBBD1675AB8 disconnected due to malformed packet.
+1643307696: New connection from 172.19.0.1:61762 on port 1883.
+1643307696: New client connected from 172.19.0.1:61762 as auto-63335995-4E3F-8B1F-137B-8A72F93A6156 (p5, c1, k10).
+1643307696: Client auto-63335995-4E3F-8B1F-137B-8A72F93A6156 disconnected due to malformed packet.
+1643307698: New connection from 172.19.0.1:61764 on port 1883.
+1643307698: New client connected from 172.19.0.1:61764 as auto-B94FBBD8-7D86-4CE9-822A-7BF87D52EE4E (p5, c1, k10).
+1643307698: Client auto-B94FBBD8-7D86-4CE9-822A-7BF87D52EE4E disconnected due to malformed packet.
+1643307700: New connection from 172.19.0.1:61766 on port 1883.
+1643307700: New client connected from 172.19.0.1:61766 as auto-7BBEF8AF-48ED-9DB1-89DF-6CBFE5FD30EC (p5, c1, k10).
+1643307700: Client auto-7BBEF8AF-48ED-9DB1-89DF-6CBFE5FD30EC disconnected due to malformed packet.
+1643307703: New connection from 172.19.0.1:61768 on port 1883.
+1643307703: New client connected from 172.19.0.1:61768 as auto-EB3704CE-5FCF-BB65-F800-F71558518D0D (p5, c1, k10).
+1643307703: Client auto-EB3704CE-5FCF-BB65-F800-F71558518D0D disconnected due to malformed packet.
+1643307706: New connection from 172.19.0.1:61770 on port 1883.
+1643307706: New client connected from 172.19.0.1:61770 as auto-1D73DEC5-166A-F568-AC5E-789F7B951D4E (p5, c1, k10).
+1643307706: Client auto-1D73DEC5-166A-F568-AC5E-789F7B951D4E disconnected due to malformed packet.
+1643308845: New connection from 172.19.0.1:61772 on port 1883.
+1643308845: New client connected from 172.19.0.1:61772 as go_mqtt_client (p2, c1, k30, u'test').
+1643308859: Client go_mqtt_client disconnected.
+1643308888: New connection from 172.19.0.1:61774 on port 1883.
+1643308888: New client connected from 172.19.0.1:61774 as go_mqtt_client (p2, c1, k30, u'test').
+1643308894: Client go_mqtt_client closed its connection.
+1643309150: New connection from 172.19.0.1:61776 on port 1883.
+1643309150: New client connected from 172.19.0.1:61776 as emqx_test_client (p2, c1, k60).
+1643309156: Client emqx_test_client disconnected.
+1643309195: New connection from 172.19.0.1:61778 on port 1883.
+1643309195: New client connected from 172.19.0.1:61778 as emqx_test_client (p2, c1, k60).
+1643309201: Client emqx_test_client disconnected.
+1643309330: mosquitto version 2.0.14 terminating
+1643309330: Saving in-memory database to /mosquitto/data//mosquitto.db.

@@ -1,0 +1,11 @@
+version: '3.9'
+services:
+  mosquitto:
+      container_name: mosquitto
+      image: eclipse-mosquitto
+      volumes:
+        - "./config:/mosquitto/config"
+        - "./log:/mosquitto/log"
+        - "./data:/mosquitto/data"
+      ports:
+        - "1883:1883" 
