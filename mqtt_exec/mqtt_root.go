@@ -21,26 +21,28 @@ var csgEnd sync.WaitGroup
 
 type Payload struct {
 	StartTS int64            `bson:"startTS"`
+	Counter int64            `bson:"counter"`
 	Buffer  primitive.Binary `bson:"buffer"`
 }
 
 func consumer(c mqtt.Client, topic string, counter int, qosLevel int64, samplePacketNumber uint) {
 	var payload Payload
 	var latency int64 = 0
+	var lastCounter int64 = 0
+	var lostPackage int64 = 0
 	var sampleCounter uint = 0
 	recvr := mqtt.NewMessageReceiver()
 
 	subscriptions := []*mqtt.Subscription{}
 	subscriptions = append(subscriptions, &mqtt.Subscription{TopicFilter: topic, QoSLevel: byte(qosLevel)})
 
-	suback, err := c.Subscribe(context.Background(), subscriptions, nil, recvr)
+	_, err := c.Subscribe(context.Background(), subscriptions, nil, recvr)
 	if err != nil {
 		log.Fatal(err)
 	}
-	log.Printf("SUBACK-%d: %v\n", counter, suback)
 	//signal wait group
 	csg.Done()
-
+	fmt.Printf("Consumer-%d Entered\n", counter)
 	for {
 		p, err := recvr.Recv()
 		if err != nil {
@@ -51,22 +53,34 @@ func consumer(c mqtt.Client, topic string, counter int, qosLevel int64, samplePa
 		}
 		sampleCounter++
 		bson.Unmarshal(p.Payload, &payload)
-		latency := latency + (time.Now().UnixMilli() - payload.StartTS)
-		if sampleCounter >= samplePacketNumber {
-			sampleCounter = 0
-			latency = 0
-			fmt.Printf("CONSUMER %d recvd(%dmsec)\n", counter, latency/int64(samplePacketNumber))
+
+		if lastCounter >= payload.Counter {
+			lostPackage++
 		}
 
+		latency := latency + (time.Now().UnixMilli() - payload.StartTS)
+		if sampleCounter >= samplePacketNumber {
+			latMean := latency / int64(samplePacketNumber)
+			sampleCounter = 0
+			latency = 0
+			fmt.Printf("CONSUMER %d latency(%d mSec) lost package(%d)\n", counter, latMean, lostPackage)
+		}
 	}
-	log.Printf("Consumer-%d Exit\n", counter)
+	fmt.Printf("Consumer-%d Exit\n", counter)
 	csgEnd.Done()
 }
 
-func producer(c mqtt.Client, topic string, counter int, qosLevel int64, iteration int) {
+func producer(c mqtt.Client, topic string, counter int, qosLevel int64, iteration int, samplePacketNumber uint) {
+	var latency int64 = 0
+	var sampleCounter uint = 0
+	var globalCounter int64 = 0
+	fmt.Printf("Producer-%d-qos[%d]-Entered\n", counter, qosLevel)
 	for i := 0; i < iteration; i++ {
+		startTS := time.Now().UnixMilli()
+		globalCounter++
 		payload := Payload{
-			StartTS: time.Now().UnixMilli(),
+			StartTS: startTS,
+			Counter: globalCounter,
 			Buffer: primitive.Binary{
 				Subtype: 0,
 				Data:    []byte("END-TEST"),
@@ -80,11 +94,22 @@ func producer(c mqtt.Client, topic string, counter int, qosLevel int64, iteratio
 		if err != nil {
 			log.Fatal(err)
 		}
+
+		// calculate latency
+		sampleCounter++
+		latency = latency + (time.Now().UnixMilli() - startTS)
+		if sampleCounter >= samplePacketNumber {
+			latMean := latency / int64(samplePacketNumber)
+			sampleCounter = 0
+			latency = 0
+			fmt.Printf("PRODUCER %d recvd(%d mSec)\n", counter, latMean)
+		}
 	}
 	err := c.Publish(context.Background(), topic, byte(qosLevel), false, []byte("END-TEST"), nil)
 	if err != nil {
 		log.Fatal(err)
 	}
+	fmt.Printf("Producer-%d Exit\n", counter)
 }
 
 // TestConfig ...
@@ -133,7 +158,7 @@ func ExecuteTest(config *TestConfig) {
 	log.Printf("Broker returned CONNACK - %s\n", connack)
 
 	log.Println("Start consumer")
-	for i := 1; i == config.InstanceNumber; i++ {
+	for i := 1; i <= config.InstanceNumber; i++ {
 		csg.Add(1)
 		csgEnd.Add(1)
 		// execute on
@@ -143,13 +168,13 @@ func ExecuteTest(config *TestConfig) {
 	csg.Wait()
 	//all consumer are started
 	log.Println("Start producer")
-	for i := 1; i == config.InstanceNumber; i++ {
+	for i := 1; i <= config.InstanceNumber; i++ {
 		// execute on
-		go producer(client, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance)
+		go producer(client, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
 	}
 
 	csgEnd.Wait()
-	for i := 1; i == config.InstanceNumber; i++ {
+	for i := 1; i <= config.InstanceNumber; i++ {
 		withTimeOut, cancelFn := context.WithTimeout(context.Background(), time.Duration(1)*time.Second)
 		defer cancelFn()
 		_, err = client.Unsubscribe(withTimeOut, []string{fmt.Sprintf("topic-%d", i)}, nil)

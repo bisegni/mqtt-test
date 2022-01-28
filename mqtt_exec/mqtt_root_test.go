@@ -6,7 +6,7 @@ func TestMQQTTest(t *testing.T) {
 	var config = &TestConfig{
 		Broker:               "tcp://localhost:1883/mqtt",
 		Topic:                "test",
-		Qos:                  "0",
+		Qos:                  "1",
 		InstanceNumber:       1,
 		IterationForInstance: 10000,
 		SamplePacketNumber:   1000,

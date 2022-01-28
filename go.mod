@@ -4,6 +4,7 @@ go 1.17
 
 require (
 	github.com/mitchellh/go-homedir v1.1.0
+	github.com/rs/zerolog v1.26.1
 	github.com/spf13/cobra v1.3.0
 	github.com/spf13/viper v1.10.0
 	github.com/srishina/mqtt.go v0.0.0-20210323200933-f15246e80bc4
