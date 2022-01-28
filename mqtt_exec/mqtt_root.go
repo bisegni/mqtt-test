@@ -162,7 +162,7 @@ func ExecuteTest(config *TestConfig) {
 		csg.Add(1)
 		csgEnd.Add(1)
 		// execute on
-		go consumer(client, fmt.Sprintf("topic-%d", i), i, qosLevel, uint(config.SamplePacketNumber))
+		go consumer(client, fmt.Sprintf("topic-%d", 1), i, qosLevel, uint(config.SamplePacketNumber))
 	}
 
 	csg.Wait()
