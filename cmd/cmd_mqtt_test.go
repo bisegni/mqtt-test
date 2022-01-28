@@ -1,35 +1,21 @@
 package cmd
 
 import (
-	"log"
-	"os"
+	"fmt"
 
-	"github.com/bisegni/mqtt-test/mqtt_exec"
 	"github.com/spf13/cobra"
 )
 
 var mqttTestCMD = &cobra.Command{
 	Use:   "mqtt",
-	Short: "Execute mqtt test",
-	Long:  `Execute test on mqtt pub/sub tech`,
+	Short: "A brief description of your command",
+	Long: `A longer description that spans multiple lines and likely contains examples
+and usage of using your command. For example:
+Cobra is a CLI library for Go that empowers applications.
+This application is a tool to generate the needed files
+to quickly create a Cobra application.`,
 	Run: func(cmd *cobra.Command, args []string) {
-		if len(args) != 3 {
-			log.Fatal("mqtt comamnd need broker topic and qosLevel paramter")
-			os.Exit(1)
-		}
-
-		in, _ := cmd.Flags().GetInt("instances")
-		iter, _ := cmd.Flags().GetInt("iteration")
-		sc, _ := cmd.Flags().GetInt("sample-count")
-		var config = &mqtt_exec.TestConfig{
-			Broker:               args[0],
-			Topic:                args[1],
-			Qos:                  args[2],
-			InstanceNumber:       in,
-			IterationForInstance: iter,
-			SamplePacketNumber:   sc,
-		}
-		mqtt_exec.ExecuteTest(config)
+		fmt.Println("Starting mqtt pub/sub test")
 	},
 }
 
