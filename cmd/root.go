@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/sirupsen/logrus"
 	"github.com/spf13/cobra"
 )
 
@@ -44,12 +43,7 @@ var rootCmd = &cobra.Command{
 	// Uncomment the following line if your bare application
 	// has an action associated with it:
 	Run: func(cmd *cobra.Command, args []string) {
-		showVersion, _ := cmd.Flags().GetBool("version")
-		if showVersion {
-			fmt.Printf("Build Time: %s\n", Buildtime)
-			fmt.Printf("Commit Hash: %s\n", Version)
-			os.Exit(0)
-		}
+		fmt.Println("Hello CLI")
 	},
 }
 
@@ -58,7 +52,7 @@ var rootCmd = &cobra.Command{
 // ----------------------------------------------------------------------------
 
 func init() {
-	logrus.SetReportCaller(false)
+	fmt.Println("inside init")
 	cobra.OnInitialize(initConfig)
 }
 
@@ -73,5 +67,5 @@ func Execute() {
 }
 
 func initConfig() {
-
+	fmt.Println("inside initConfig")
 }

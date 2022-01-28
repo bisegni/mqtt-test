@@ -35,8 +35,9 @@ var mqttTestCMD = &cobra.Command{
 
 // Initialize the flag
 func init() {
-	mqttTestCMD.Flags().IntP("instances", "n", 1, "The number of producer-consumer instance to use")
-	mqttTestCMD.Flags().IntP("iteration", "i", 10000, "Is the number of message to send")
-	mqttTestCMD.Flags().IntP("sample-count", "s", 10000, "The number of packed after wich latency is sampled")
 	rootCmd.AddCommand(mqttTestCMD)
+	// mqttTestCMD.Flags().IntP("instances", "n", 1, "The number of producer-consumer instance to use")
+	// mqttTestCMD.Flags().IntP("iteration", "i", 10000, "Is the number of message to send")
+	// mqttTestCMD.Flags().IntP("sample-count", "s", 10000, "The number of packed after wich latency is sampled")
+
 }
