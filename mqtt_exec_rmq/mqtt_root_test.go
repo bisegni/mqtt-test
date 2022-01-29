@@ -8,7 +8,7 @@ func TestMQQTTest(t *testing.T) {
 		Topic:                "test",
 		Qos:                  "0",
 		InstanceNumber:       2,
-		IterationForInstance: 10000,
+		IterationForInstance: 100000,
 		SamplePacketNumber:   1000,
 	}
 

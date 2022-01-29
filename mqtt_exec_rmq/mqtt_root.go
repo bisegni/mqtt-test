@@ -29,13 +29,23 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	var lastCounter int64 = 0
 	var lostPackage int64 = 0
 	var sampleCounter uint = 0
-
+	var globalCounter int64 = 0
 	ch, err := conn.Channel()
+	ch.Qos(100, 0, false)
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
+	ch.ExchangeDeclare(
+		"input-gateway", // name
+		"direct",        // type
+		false,           // durable
+		false,           // auto-deleted
+		false,           // internal
+		false,           // no-wait
+		nil,             // arguments
+	)
 
 	q, err := ch.QueueDeclare(
-		topic, // name
+		"",    // name
 		false, // durable
 		false, // delete when unused
 		false, // exclusive
@@ -43,6 +53,23 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 		nil,   // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
+
+	err = ch.QueueBind(
+		q.Name,          // queue name
+		topic,           // routing key
+		"input-gateway", // exchange
+		false,
+		nil)
+	failOnError(err, "Failed to declare a queue")
+
+	err = ch.QueueBind(
+		q.Name,          // queue name
+		"end-signal",    // routing key
+		"input-gateway", // exchange
+		false,
+		nil)
+	failOnError(err, "Failed to declare a queue")
+
 	msgs, err := ch.Consume(
 		q.Name, // queue
 		"",     // consumer
@@ -60,6 +87,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 		if bytes.Equal([]byte("END-TEST"), m.Body) {
 			break
 		}
+		globalCounter++
 		sampleCounter++
 		bson.Unmarshal(m.Body, &payload)
 
@@ -72,7 +100,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 			latMean := latency / int64(samplePacketNumber)
 			sampleCounter = 0
 			latency = 0
-			fmt.Printf("CONSUMER %d latency(%d mSec) lost package(%d)\n", counter, latMean, lostPackage)
+			fmt.Printf("CONSUMER %d latency(%d mSec) lost package(%d) totpkg(%d)\n", counter, latMean, lostPackage, globalCounter)
 		}
 	}
 	fmt.Printf("Consumer-%d Exit\n", counter)
@@ -86,15 +114,8 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	var latency int64 = 0
 	var sampleCounter uint = 0
 	var globalCounter int64 = 0
-	q, err := ch.QueueDeclare(
-		topic, // name
-		false, // durable
-		false, // delete when unused
-		false, // exclusive
-		false, // no-wait
-		nil,   // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
+
+	// failOnError(err, "Failed to declare a queue")
 	fmt.Printf("Producer-%d-qos[%d]-Entered\n", counter, qosLevel)
 	for i := 0; i < iteration; i++ {
 		startTS := time.Now().UnixMilli()
@@ -113,10 +134,10 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 		}
 
 		err = ch.Publish(
-			"",     // exchange
-			q.Name, // routing key
-			false,  // mandatory
-			false,  // immediate
+			"input-gateway", // exchange
+			topic,           // routing key
+			false,           // mandatory
+			false,           // immediate
 			amqp.Publishing{
 				ContentType: "bson",
 				Body:        b,
@@ -127,18 +148,18 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 		sampleCounter++
 		latency = latency + (time.Now().UnixMilli() - startTS)
 		if sampleCounter >= samplePacketNumber {
-			latMean := latency / int64(samplePacketNumber)
+			//latMean := latency / int64(samplePacketNumber)
 			sampleCounter = 0
 			latency = 0
-			fmt.Printf("PRODUCER %d latency(%d mSec)\n", counter, latMean)
+			//fmt.Printf("PRODUCER %d latency(%d mSec) totpkg(%d)\n", counter, latMean, globalCounter)
 		}
 	}
 
 	err = ch.Publish(
-		"",     // exchange
-		q.Name, // routing key
-		false,  // mandatory
-		false,  // immediate
+		"input-gateway", // exchange
+		"end-signal",    // routing key
+		false,           // mandatory
+		false,           // immediate
 		amqp.Publishing{
 			ContentType: "bson",
 			Body:        []byte("END-TEST"),
@@ -175,7 +196,6 @@ func ExecuteTest(config *TestConfig) {
 	defer conn.Close()
 
 	log.Println("Start consumer")
-	log.Println("Start consumer")
 	for i := 1; i <= config.InstanceNumber; i++ {
 		csg.Add(1)
 		csgEnd.Add(1)
@@ -186,9 +206,10 @@ func ExecuteTest(config *TestConfig) {
 	csg.Wait()
 	//all consumer are started
 	log.Println("Start producer")
-	for i := 1; i <= config.InstanceNumber; i++ {
-		// execute on
-		go producer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
-	}
+	// for i := 1; i <= config.InstanceNumber; i++ {
+	// 	// execute on
+	// 	go producer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
+	// }
+	producer(conn, fmt.Sprintf("topic-%d", 1), 1, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
 	csgEnd.Wait()
 }
