@@ -31,12 +31,12 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	var sampleCounter uint = 0
 	var globalCounter int64 = 0
 	ch, err := conn.Channel()
-	ch.Qos(100, 0, false)
+	ch.Qos(10, 0, false)
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 	ch.ExchangeDeclare(
 		"input-gateway", // name
-		"direct",        // type
+		"x-random",      // type
 		false,           // durable
 		false,           // auto-deleted
 		false,           // internal
@@ -139,6 +139,7 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 			false,           // mandatory
 			false,           // immediate
 			amqp.Publishing{
+				//DeliveryMode: amqp.Persistent,
 				ContentType: "bson",
 				Body:        b,
 			})
@@ -212,4 +213,6 @@ func ExecuteTest(config *TestConfig) {
 	// }
 	producer(conn, fmt.Sprintf("topic-%d", 1), 1, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
 	csgEnd.Wait()
+
+	conn.Close()
 }
