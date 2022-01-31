@@ -36,7 +36,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	defer ch.Close()
 	ch.ExchangeDeclare(
 		"input-gateway", // name
-		"x-random",      // type
+		"direct",        // type
 		false,           // durable
 		false,           // auto-deleted
 		false,           // internal
@@ -47,7 +47,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	q, err := ch.QueueDeclare(
 		"",    // name
 		false, // durable
-		false, // delete when unused
+		true,  // delete when unused
 		false, // exclusive
 		false, // no-wait
 		nil,   // arguments
@@ -62,13 +62,13 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 		nil)
 	failOnError(err, "Failed to declare a queue")
 
-	err = ch.QueueBind(
-		q.Name,          // queue name
-		"end-signal",    // routing key
-		"input-gateway", // exchange
-		false,
-		nil)
-	failOnError(err, "Failed to declare a queue")
+	// err = ch.QueueBind(
+	// 	q.Name,          // queue name
+	// 	"end-signal",    // routing key
+	// 	"input-gateway", // exchange
+	// 	false,
+	// 	nil)
+	// failOnError(err, "Failed to declare a queue")
 
 	msgs, err := ch.Consume(
 		q.Name, // queue
@@ -158,7 +158,7 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 
 	err = ch.Publish(
 		"input-gateway", // exchange
-		"end-signal",    // routing key
+		topic,           // routing key
 		false,           // mandatory
 		false,           // immediate
 		amqp.Publishing{
@@ -202,16 +202,16 @@ func ExecuteTest(config *TestConfig) {
 		csgEnd.Add(1)
 
 		// execute on
-		go consumer(conn, fmt.Sprintf("topic-%d", 1), i, qosLevel, uint(config.SamplePacketNumber))
+		go consumer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, uint(config.SamplePacketNumber))
 	}
 	csg.Wait()
 	//all consumer are started
 	log.Println("Start producer")
-	// for i := 1; i <= config.InstanceNumber; i++ {
-	// 	// execute on
-	// 	go producer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
-	// }
-	producer(conn, fmt.Sprintf("topic-%d", 1), 1, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
+	for i := 1; i <= config.InstanceNumber; i++ {
+		// execute on
+		go producer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
+	}
+	//producer(conn, fmt.Sprintf("topic-%d", 1), 1, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
 	csgEnd.Wait()
 
 	conn.Close()
