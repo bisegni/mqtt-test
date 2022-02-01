@@ -139,12 +139,12 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 	var currentByteSize int64 = 1
 	var statistic Statistic
 	q, err := ch.QueueDeclare(
-		"",    // name
-		false, // durable
-		false, // delete when unused
-		true,  // exclusive
-		false, // noWait
-		nil,   // arguments
+		fmt.Sprintf("%s-resp", topic), // name
+		false,                         // durable
+		false,                         // delete when unused
+		true,                          // exclusive
+		false,                         // noWait
+		nil,                           // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
 
