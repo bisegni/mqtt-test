@@ -7,10 +7,10 @@ func TestMQQTTest(t *testing.T) {
 		Broker:               "amqp://localhost:5672/",
 		Topic:                "test",
 		Qos:                  0,
-		InstanceNumber:       1,
+		InstanceNumber:       2,
 		IterationForInstance: 10,
-		SamplePacketNumber:   1000,
-		MaxPayloasSize:       8,
+		SamplePacketNumber:   1024,
+		RaisedTo:             8,
 	}
 
 	ExecuteTest(config)
