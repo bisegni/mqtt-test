@@ -2,9 +2,9 @@ package mqtt_exec_rmq
 
 import (
 	"bytes"
+	"crypto/rand"
 	"fmt"
 	"log"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -23,15 +23,14 @@ type Payload struct {
 	Buffer  primitive.Binary `bson:"buffer"`
 }
 
-func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, samplePacketNumber uint) {
+func consumer(conn *amqp.Connection, topic string, counter int, config *TestConfig) {
 	var payload Payload
 	var latency int64 = 0
 	var lastCounter int64 = 0
 	var lostPackage int64 = 0
-	var sampleCounter uint = 0
 	var globalCounter int64 = 0
 	ch, err := conn.Channel()
-	ch.Qos(10, 0, false)
+	ch.Qos(1, 0, false)
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 	ch.ExchangeDeclare(
@@ -83,77 +82,144 @@ func consumer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 	//signal wait group
 	csg.Done()
 	fmt.Printf("Consumer-%d Entered\n", counter)
+
 	for m := range msgs {
 		if bytes.Equal([]byte("END-TEST"), m.Body) {
+			//stop work
 			break
 		}
+		if bytes.Equal([]byte("END-ITERATION"), m.Body) {
+			latMean := float64(latency) / float64(globalCounter)
+			resp := fmt.Sprintf("CONSUMER %d latency(%f mSec) lost package(%d) totpkg(%d)\n", counter, latMean, lostPackage, globalCounter)
+			err = ch.Publish(
+				"",        // exchange
+				m.ReplyTo, // routing key
+				false,     // mandatory
+				false,     // immediate
+				amqp.Publishing{
+					ContentType:   "text/plain",
+					CorrelationId: m.CorrelationId,
+					Body:          []byte(resp),
+				})
+			failOnError(err, "Failed to publish a message")
+			// go to next test
+			latency = 0
+			globalCounter = 0
+			lastCounter = 0
+			lostPackage = 0
+			continue
+		}
 		globalCounter++
-		sampleCounter++
 		bson.Unmarshal(m.Body, &payload)
 
-		if lastCounter >= payload.Counter {
+		if (lastCounter + 1) != payload.Counter {
 			lostPackage++
 		}
-
-		latency := latency + (time.Now().UnixMilli() - payload.StartTS)
-		if sampleCounter >= samplePacketNumber {
-			latMean := latency / int64(samplePacketNumber)
-			sampleCounter = 0
-			latency = 0
-			fmt.Printf("CONSUMER %d latency(%d mSec) lost package(%d) totpkg(%d)\n", counter, latMean, lostPackage, globalCounter)
-		}
+		lastCounter = payload.Counter
+		latency = latency + (time.Now().UnixMilli() - payload.StartTS)
 	}
 	fmt.Printf("Consumer-%d Exit\n", counter)
 	csgEnd.Done()
 }
 
-func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, iteration int, samplePacketNumber uint) {
+func getPayload(size int64) []byte {
+	token := make([]byte, size)
+	rand.Read(token)
+	return token
+}
+
+func producer(conn *amqp.Connection, topic string, counter int, config *TestConfig) {
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 	var latency int64 = 0
 	var sampleCounter uint = 0
 	var globalCounter int64 = 0
-
+	var currentByteSize int64 = 1
+	var latmean float64 = 0
+	var producerOut string
+	var consumerOut string
 	// failOnError(err, "Failed to declare a queue")
-	fmt.Printf("Producer-%d-qos[%d]-Entered\n", counter, qosLevel)
-	for i := 0; i < iteration; i++ {
-		startTS := time.Now().UnixMilli()
-		globalCounter++
-		payload := Payload{
-			StartTS: startTS,
-			Counter: globalCounter,
-			Buffer: primitive.Binary{
-				Subtype: 0,
-				Data:    []byte("END-TEST"),
-			},
-		}
-		b, err := bson.Marshal(payload)
-		if err != nil {
-			log.Fatal(err)
-		}
+	fmt.Printf("Producer-%d-qos[%d]-Entered\n", counter, config.Qos)
+	q, err := ch.QueueDeclare(
+		"",    // name
+		false, // durable
+		false, // delete when unused
+		true,  // exclusive
+		false, // noWait
+		nil,   // arguments
+	)
+	failOnError(err, "Failed to declare a queue")
 
+	resp, err := ch.Consume(
+		q.Name, // queue
+		"",     // consumer
+		true,   // auto-ack
+		false,  // exclusive
+		false,  // no-local
+		false,  // no-wait
+		nil,    // args
+	)
+	failOnError(err, "Failed to declare a queue")
+	for currentByteSize < config.MaxPayloasSize {
+		fmt.Printf("Use buffer size of %d\n", currentByteSize)
+		for i := 0; i < config.IterationForInstance; i++ {
+			startTS := time.Now().UnixMilli()
+			globalCounter++
+			payload := Payload{
+				StartTS: startTS,
+				Counter: globalCounter,
+				Buffer: primitive.Binary{
+					Subtype: 0,
+					Data:    getPayload(currentByteSize),
+				},
+			}
+			b, err := bson.Marshal(payload)
+			if err != nil {
+				log.Fatal(err)
+			}
+
+			err = ch.Publish(
+				"input-gateway", // exchange
+				topic,           // routing key
+				false,           // mandatory
+				false,           // immediate
+				amqp.Publishing{
+					ContentType: "bson",
+					Body:        b,
+				})
+			failOnError(err, "Failed to publish a message")
+
+			// calculate latency
+			sampleCounter++
+			latency = latency + (time.Now().UnixMilli() - startTS)
+		}
+		latmean = float64(latency) / float64(globalCounter)
+		latency = 0
+		globalCounter = 0
+		producerOut = fmt.Sprintf("PRODUCER %d latency(%f mSec) totpkg(%d)", counter, latmean, globalCounter)
 		err = ch.Publish(
 			"input-gateway", // exchange
 			topic,           // routing key
 			false,           // mandatory
 			false,           // immediate
 			amqp.Publishing{
-				//DeliveryMode: amqp.Persistent,
-				ContentType: "bson",
-				Body:        b,
+				ContentType:   "bson",
+				CorrelationId: strconv.FormatInt(currentByteSize, 10),
+				ReplyTo:       q.Name,
+				Body:          []byte("END-ITERATION"),
 			})
-		failOnError(err, "Failed to publish a message")
-
-		// calculate latency
-		sampleCounter++
-		latency = latency + (time.Now().UnixMilli() - startTS)
-		if sampleCounter >= samplePacketNumber {
-			//latMean := latency / int64(samplePacketNumber)
-			sampleCounter = 0
-			latency = 0
-			//fmt.Printf("PRODUCER %d latency(%d mSec) totpkg(%d)\n", counter, latMean, globalCounter)
+		failOnError(err, "Failed to declare a queue")
+		//get response
+		for d := range resp {
+			if strconv.FormatInt(currentByteSize, 10) == d.CorrelationId {
+				consumerOut = string(d.Body)
+				break
+			}
 		}
+		threadOutput[counter-1] = fmt.Sprintf("%s - %s", producerOut, consumerOut)
+		// ncrement byte size
+		currentByteSize = currentByteSize * 2
 	}
 
 	err = ch.Publish(
@@ -173,10 +239,11 @@ func producer(conn *amqp.Connection, topic string, counter int, qosLevel int64, 
 type TestConfig struct {
 	Broker               string
 	Topic                string
-	Qos                  string
+	Qos                  int
 	InstanceNumber       int
 	IterationForInstance int
 	SamplePacketNumber   int
+	MaxPayloasSize       int64
 }
 
 func failOnError(err error, msg string) {
@@ -185,13 +252,10 @@ func failOnError(err error, msg string) {
 	}
 }
 
+var threadOutput []string
+
 // ExecuteTest ...
 func ExecuteTest(config *TestConfig) {
-	qosLevel, err := strconv.ParseInt(config.Qos, 10, 64)
-	if err != nil {
-		log.Fatal(err)
-		os.Exit(1)
-	}
 	conn, err := amqp.Dial(config.Broker)
 	failOnError(err, "Failed to connect to RabbitMQ")
 	defer conn.Close()
@@ -199,19 +263,21 @@ func ExecuteTest(config *TestConfig) {
 	log.Println("Start consumer")
 	for i := 1; i <= config.InstanceNumber; i++ {
 		csg.Add(1)
-		csgEnd.Add(1)
 
 		// execute on
-		go consumer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, uint(config.SamplePacketNumber))
+		go consumer(conn, fmt.Sprintf("topic-%d", i), i, config)
 	}
 	csg.Wait()
+
+	//create output array for consumer
+	threadOutput = make([]string, config.InstanceNumber)
 	//all consumer are started
 	log.Println("Start producer")
 	for i := 1; i <= config.InstanceNumber; i++ {
+		csgEnd.Add(1)
 		// execute on
-		go producer(conn, fmt.Sprintf("topic-%d", i), i, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
+		go producer(conn, fmt.Sprintf("topic-%d", i), i, config)
 	}
-	//producer(conn, fmt.Sprintf("topic-%d", 1), 1, qosLevel, config.IterationForInstance, uint(config.SamplePacketNumber))
 	csgEnd.Wait()
 
 	conn.Close()

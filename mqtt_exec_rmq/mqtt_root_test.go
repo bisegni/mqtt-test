@@ -4,12 +4,13 @@ import "testing"
 
 func TestMQQTTest(t *testing.T) {
 	var config = &TestConfig{
-		Broker:               "amqp://admin:admin@LiwaxM1.local:5672/",
+		Broker:               "amqp://localhost:5672/",
 		Topic:                "test",
-		Qos:                  "0",
+		Qos:                  0,
 		InstanceNumber:       1,
-		IterationForInstance: 100000,
+		IterationForInstance: 10,
 		SamplePacketNumber:   1000,
+		MaxPayloasSize:       8,
 	}
 
 	ExecuteTest(config)
