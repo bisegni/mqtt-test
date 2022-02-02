@@ -8,11 +8,11 @@ import (
 	"image/color"
 	"log"
 	"math"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/streadway/amqp"
+	"github.com/rabbitmq/rabbitmq-stream-go-client/pkg/amqp"
+	"github.com/rabbitmq/rabbitmq-stream-go-client/pkg/stream"
 	bson "go.mongodb.org/mongo-driver/bson"
 	"go.mongodb.org/mongo-driver/bson/primitive"
 	"gonum.org/v1/plot"
@@ -29,7 +29,11 @@ type Payload struct {
 	Buffer  primitive.Binary `bson:"buffer"`
 }
 
-func consumer(conn *amqp.Connection, topic string, counter int, config *TestConfig) {
+func consumerClose(channelClose stream.ChannelClose) {
+	event := <-channelClose
+	fmt.Printf("Consumer: %s closed on the stream: %s, reason: %s \n", event.Name, event.StreamName, event.Reason)
+}
+func consumer(conn *stream.Environment, topic string, counter int, config *TestConfig) {
 	var payload Payload
 	var latency int64 = 0
 	var lastCounter int64 = 0
@@ -41,58 +45,16 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 	var payloadSizeMeanSample int64 = 0
 	var payloadLastTS int64 = time.Now().UnixMilli()
 	var statistic Statistic
+	var producerResp *stream.Producer
+	var consumer *stream.Consumer
 
-	ch, err := conn.Channel()
-	ch.Qos(config.Qos, 0, false)
-	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
-	ch.ExchangeDeclare(
-		"input-gateway", // name
-		"direct",        // type
-		false,           // durable
-		false,           // auto-deleted
-		false,           // internal
-		false,           // no-wait
-		nil,             // arguments
-	)
-
-	q, err := ch.QueueDeclare(
-		topic,                                // name
-		true,                                 // durable
-		false,                                // delete when unused
-		false,                                // exclusive
-		false,                                // no-wait
-		amqp.Table{"x-queue-type": "stream"}, // arguments,   // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
-
-	err = ch.QueueBind(
-		q.Name,          // queue name
-		topic,           // routing key
-		"input-gateway", // exchange
-		false,
-		nil)
-	failOnError(err, "Failed to declare a queue")
-
-	msgs, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		false,  // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
-	failOnError(err, "Failed to register a consumer")
-	//signal wait group
-	csg.Done()
-	for m := range msgs {
-		ch.Ack(m.DeliveryTag, false)
-		if bytes.Equal([]byte("END-TEST"), m.Body) {
+	handleMessages := func(consumerContext stream.ConsumerContext, message *amqp.Message) {
+		if bytes.Equal([]byte("END-TEST"), message.GetData()) {
 			//stop work
-			break
-		}
-		if bytes.Equal([]byte("END-ITERATION"), m.Body) {
+			consumer.Close()
+			csgEnd.Done()
+			return
+		} else if bytes.Equal([]byte("END-ITERATION"), message.GetData()) {
 			statistic.ConsumerThroughputMean = float64(payloadSizeMean) / float64(payloadSizeMeanSample)
 			if math.IsNaN(statistic.ConsumerThroughputMean) {
 				statistic.ConsumerThroughputMean = 0
@@ -102,26 +64,18 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 			statistic.ConsumerReceivedPacket = globalCounter
 			statSer, _ := json.Marshal(statistic)
 
-			err = ch.Publish(
-				"",        // exchange
-				m.ReplyTo, // routing key
-				false,     // mandatory
-				false,     // immediate
-				amqp.Publishing{
-					ContentType:   "text/plain",
-					CorrelationId: m.CorrelationId,
-					Body:          statSer,
-				})
-			failOnError(err, "Failed to publish a message")
+			message := amqp.NewMessage([]byte(statSer))
+			err := producerResp.Send(message)
+			failOnError(err, "Failed to open a channel")
 			// go to next test
 			latency = 0
 			globalCounter = 0
 			lastCounter = 0
 			lostPackage = 0
-			continue
+			return
 		}
 		globalCounter++
-		bson.Unmarshal(m.Body, &payload)
+		bson.Unmarshal(message.GetData(), &payload)
 
 		if (lastCounter + 1) != payload.Counter {
 			lostPackage++
@@ -131,7 +85,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 		latency = latency + (time.Now().UnixMilli() - payload.StartTS)
 		// throughput compute
 		payloadPacketReceived++
-		payloadSizeReceived = payloadSizeReceived + int64(len(m.Body))
+		payloadSizeReceived = payloadSizeReceived + int64(len(message.GetData()))
 		// throughput
 		if sampleTime-payloadLastTS >= 1000 {
 			// sample throughput
@@ -142,7 +96,47 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 			payloadLastTS = sampleTime
 		}
 	}
-	csgEnd.Done()
+
+	err := conn.DeclareStream(
+		topic,
+		stream.NewStreamOptions().
+			SetMaxAge(time.Duration(time.Duration(1).Milliseconds())).
+			SetMaxLengthBytes(stream.ByteCapacity{}.GB(2)),
+	)
+	failOnError(err, "Failed to open a channel")
+	err = conn.DeclareStream(
+		topic+"-resp",
+		stream.NewStreamOptions().
+			SetMaxAge(time.Duration(time.Duration(1).Milliseconds())).
+			SetMaxLengthBytes(stream.ByteCapacity{}.GB(2)),
+	)
+	failOnError(err, "Failed to open a channel")
+	consumer, err = conn.NewConsumer(
+		topic,
+		handleMessages,
+		stream.NewConsumerOptions().
+			SetConsumerName(topic+"-consumer").
+			SetAutoCommit(stream.NewAutoCommitStrategy().
+				SetCountBeforeStorage(1). // each 50 messages stores the index
+				SetFlushInterval(1*time.Second)).
+			SetOffset(stream.OffsetSpecification{}.Timestamp(time.Now().UnixMilli())).
+			SetCRCCheck(false))
+	failOnError(err, "Failed to open a channel")
+	channelClose := consumer.NotifyClose()
+	defer consumerClose(channelClose)
+
+	producerResp, err = conn.NewProducer(
+		topic+"-resp",
+		&stream.ProducerOptions{
+			Name:                 topic + "-producer",
+			QueueSize:            100,
+			BatchSize:            50,
+			BatchPublishingDelay: 50,
+			SubEntrySize:         1,
+		},
+	)
+	failOnError(err, "Failed to open a channel")
+	csg.Done()
 }
 
 func getPayload(size int64) []byte {
@@ -151,12 +145,16 @@ func getPayload(size int64) []byte {
 	return token
 }
 
-func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize int64, config *TestConfig) {
-	ch, err := conn.Channel()
+func producer(conn *stream.Environment, topic string, counter int, payloadByteSize int64, config *TestConfig) {
+	producer, err := conn.NewProducer(
+		topic,
+		stream.NewProducerOptions().
+			SetSubEntrySize(500).
+			SetCompression(stream.Compression{}.None()),
+	)
 	failOnError(err, "Failed to open a channel")
-	defer ch.Close()
+	defer producer.Close()
 
-	ch.Qos(config.Qos, 0, false)
 	var latency int64 = 0
 	var sampleCounter uint = 0
 	var globalCounter int64 = 0
@@ -167,26 +165,6 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 	var payloadLastTS int64 = time.Now().UnixMilli()
 	var statistic Statistic
 
-	q, err := ch.QueueDeclare(
-		fmt.Sprintf("%s-resp", topic), // name
-		false,                         // durable
-		false,                         // delete when unused
-		true,                          // exclusive
-		false,                         // noWait
-		nil,                           // arguments
-	)
-	failOnError(err, "Failed to declare a queue")
-
-	resp, err := ch.Consume(
-		q.Name, // queue
-		"",     // consumer
-		true,   // auto-ack
-		false,  // exclusive
-		false,  // no-local
-		false,  // no-wait
-		nil,    // args
-	)
-	failOnError(err, "Failed to declare a queue")
 	for i := 0; i < config.IterationForInstance; i++ {
 		startTS := time.Now().UnixMilli()
 		globalCounter++
@@ -202,17 +180,8 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 		if err != nil {
 			log.Fatal(err)
 		}
-
-		err = ch.Publish(
-			"input-gateway", // exchange
-			topic,           // routing key
-			false,           // mandatory
-			false,           // immediate
-			amqp.Publishing{
-				DeliveryMode: 0,
-				ContentType:  "bson",
-				Body:         b,
-			})
+		message := amqp.NewMessage([]byte(b))
+		err = producer.Send(message)
 		failOnError(err, "Failed to publish a message")
 
 		sampleTime := time.Now().UnixMilli()
@@ -232,25 +201,27 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 			payloadLastTS = sampleTime
 		}
 	}
-	err = ch.Publish(
-		"input-gateway", // exchange
-		topic,           // routing key
-		false,           // mandatory
-		false,           // immediate
-		amqp.Publishing{
-			ContentType:   "bson",
-			CorrelationId: strconv.FormatInt(payloadByteSize, 10),
-			ReplyTo:       q.Name,
-			Body:          []byte("END-ITERATION"),
-		})
+
+	message := amqp.NewMessage([]byte("END-ITERATION"))
+	err = producer.Send(message)
 	failOnError(err, "Failed to declare a queue")
+	var waitForAnswer sync.WaitGroup
+	waitForAnswer.Add(1)
+	consumer, err := conn.NewConsumer(
+		topic+"-resp",
+		func(consumerContext stream.ConsumerContext, message *amqp.Message) {
+			_ = json.Unmarshal(message.GetData(), &statistic)
+			waitForAnswer.Done()
+		},
+		stream.NewConsumerOptions().
+			SetConsumerName(topic+"-resp-consumer").
+			SetAutoCommit(nil).
+			SetOffset(stream.OffsetSpecification{}.Timestamp(time.Now().UnixMilli())).
+			SetCRCCheck(false))
+	failOnError(err, "Failed to open a channel")
 	//get response
-	for d := range resp {
-		if strconv.FormatInt(payloadByteSize, 10) == d.CorrelationId {
-			_ = json.Unmarshal(d.Body, &statistic)
-			break
-		}
-	}
+	waitForAnswer.Wait()
+	consumer.Close()
 	statistic.ProducerThroughputMean = float64(payloadSizeMean) / float64(payloadSizeMeanSample)
 	if math.IsNaN(statistic.ProducerThroughputMean) {
 		statistic.ProducerThroughputMean = 0
@@ -298,15 +269,20 @@ var threadOutput []Statistic
 
 // ExecuteTest ...
 func ExecuteTest(config *TestConfig) {
-	conn, err := amqp.Dial(config.Broker)
+	addresses := []string{
+		config.Broker,
+	}
+	env, err := stream.NewEnvironment(
+		stream.NewEnvironmentOptions().
+			SetUris(addresses),
+	)
 	failOnError(err, "Failed to connect to RabbitMQ")
-	defer conn.Close()
 
 	for i := 1; i <= config.InstanceNumber; i++ {
 		csg.Add(1)
 		csgEnd.Add(1)
 		// execute on
-		go consumer(conn, fmt.Sprintf("topic-%d", i), i, config)
+		go consumer(env, fmt.Sprintf("topic-%d", i), i, config)
 	}
 	csg.Wait()
 
@@ -323,7 +299,7 @@ func ExecuteTest(config *TestConfig) {
 		for i := 1; i <= config.InstanceNumber; i++ {
 			psgEnd.Add(1)
 			// execute on
-			go producer(conn, fmt.Sprintf("topic-%d", i), i, packetSize, config)
+			go producer(env, fmt.Sprintf("topic-%d", i), i, packetSize, config)
 		}
 		// waith for all producer end to sned data
 		psgEnd.Wait()
@@ -355,25 +331,26 @@ func ExecuteTest(config *TestConfig) {
 		run++
 	}
 
-	cmdChannel, err := conn.Channel()
-	failOnError(err, "Failed to open a channel")
 	for i := 1; i <= config.InstanceNumber; i++ {
 		//signal the end of work to the consumer
 		for i := 1; i <= config.InstanceNumber; i++ {
-			err = cmdChannel.Publish(
-				"input-gateway",            // exchange
-				fmt.Sprintf("topic-%d", i), // routing key
-				false,                      // mandatory
-				false,                      // immediate
-				amqp.Publishing{
-					ContentType: "bson",
-					Body:        []byte("END-TEST"),
-				})
+			producerEndMessage, err := env.NewProducer(
+				fmt.Sprintf("topic-%d", i),
+				&stream.ProducerOptions{
+					Name:                 fmt.Sprintf("topic-%d", i) + "-producer-end-emssage",
+					QueueSize:            10,
+					BatchSize:            10,
+					BatchPublishingDelay: 0,
+				},
+			)
+			failOnError(err, "Failed to open a channel")
+			err = producerEndMessage.Send(amqp.NewMessage([]byte("END-TEST")))
+
 			failOnError(err, "Failed to publish a message")
 		}
 	}
 	csgEnd.Wait()
-	conn.Close()
+	env.Close()
 	fmt.Println("Generating plot")
 	plotStatistic(plotInstances)
 }

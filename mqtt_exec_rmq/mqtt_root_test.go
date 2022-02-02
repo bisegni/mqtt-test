@@ -4,7 +4,7 @@ import "testing"
 
 func TestMQQTTest(t *testing.T) {
 	var config = &TestConfig{
-		Broker:               "amqp://localhost:5672/",
+		Broker:               "rabbitmq-stream://guest:guest@localhost:5552/",
 		Topic:                "test",
 		Qos:                  100,
 		InstanceNumber:       1,
