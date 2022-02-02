@@ -12,7 +12,7 @@
             "mode": "auto",
             "program": "${workspaceFolder}/main.go",
             "env": {},
-            "args": ["mqtt"]
+            "args": ["nats", "nats://localhost:4222","test","100","25","-n","1"]
         }
     ]
 }
