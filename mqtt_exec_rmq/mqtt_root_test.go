@@ -6,11 +6,11 @@ func TestMQQTTest(t *testing.T) {
 	var config = &TestConfig{
 		Broker:               "amqp://localhost:5672/",
 		Topic:                "test",
-		Qos:                  0,
-		InstanceNumber:       2,
-		IterationForInstance: 10,
+		Qos:                  100,
+		InstanceNumber:       1,
+		IterationForInstance: 1000,
 		SamplePacketNumber:   1024,
-		RaisedTo:             8,
+		RaisedTo:             20,
 	}
 
 	ExecuteTest(config)

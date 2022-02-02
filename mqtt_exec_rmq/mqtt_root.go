@@ -35,10 +35,15 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 	var lastCounter int64 = 0
 	var lostPackage int64 = 0
 	var globalCounter int64 = 0
+	var payloadPacketReceived int64 = 0
+	var payloadSizeReceived int64 = 0
+	var payloadSizeMean float64 = 0
+	var payloadSizeMeanSample int64 = 0
+	var payloadLastTS int64 = time.Now().UnixMilli()
 	var statistic Statistic
 
 	ch, err := conn.Channel()
-	ch.Qos(1, 0, false)
+	ch.Qos(config.Qos, 0, false)
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
 	ch.ExchangeDeclare(
@@ -52,12 +57,12 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 	)
 
 	q, err := ch.QueueDeclare(
-		"",    // name
-		false, // durable
-		true,  // delete when unused
-		false, // exclusive
-		false, // no-wait
-		nil,   // arguments
+		topic,                                // name
+		true,                                 // durable
+		false,                                // delete when unused
+		false,                                // exclusive
+		false,                                // no-wait
+		amqp.Table{"x-queue-type": "stream"}, // arguments,   // arguments
 	)
 	failOnError(err, "Failed to declare a queue")
 
@@ -72,7 +77,7 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 	msgs, err := ch.Consume(
 		q.Name, // queue
 		"",     // consumer
-		true,   // auto-ack
+		false,  // auto-ack
 		false,  // exclusive
 		false,  // no-local
 		false,  // no-wait
@@ -82,12 +87,16 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 	//signal wait group
 	csg.Done()
 	for m := range msgs {
+		ch.Ack(m.DeliveryTag, false)
 		if bytes.Equal([]byte("END-TEST"), m.Body) {
 			//stop work
 			break
 		}
 		if bytes.Equal([]byte("END-ITERATION"), m.Body) {
-
+			statistic.ConsumerThroughputMean = float64(payloadSizeMean) / float64(payloadSizeMeanSample)
+			if math.IsNaN(statistic.ConsumerThroughputMean) {
+				statistic.ConsumerThroughputMean = 0
+			}
 			statistic.ConsumerLatency = float64(latency) / float64(globalCounter)
 			statistic.ConsumerLostPacket = lostPackage
 			statistic.ConsumerReceivedPacket = globalCounter
@@ -117,8 +126,21 @@ func consumer(conn *amqp.Connection, topic string, counter int, config *TestConf
 		if (lastCounter + 1) != payload.Counter {
 			lostPackage++
 		}
+		sampleTime := time.Now().UnixMilli()
 		lastCounter = payload.Counter
 		latency = latency + (time.Now().UnixMilli() - payload.StartTS)
+		// throughput compute
+		payloadPacketReceived++
+		payloadSizeReceived = payloadSizeReceived + int64(len(m.Body))
+		// throughput
+		if sampleTime-payloadLastTS >= 1000 {
+			// sample throughput
+			payloadSizeMeanSample++
+			payloadSizeMean = payloadSizeMean + (float64(payloadSizeReceived) / float64(payloadPacketReceived))
+			payloadSizeReceived = 0
+			payloadPacketReceived = 0
+			payloadLastTS = sampleTime
+		}
 	}
 	csgEnd.Done()
 }
@@ -133,11 +155,18 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 	ch, err := conn.Channel()
 	failOnError(err, "Failed to open a channel")
 	defer ch.Close()
+
+	ch.Qos(config.Qos, 0, false)
 	var latency int64 = 0
 	var sampleCounter uint = 0
 	var globalCounter int64 = 0
-	var currentByteSize int64 = 1
+	var payloadPacketSent int64 = 0
+	var payloadSizeSent int64 = 0
+	var payloadSizeMean float64 = 0
+	var payloadSizeMeanSample int64 = 0
+	var payloadLastTS int64 = time.Now().UnixMilli()
 	var statistic Statistic
+
 	q, err := ch.QueueDeclare(
 		fmt.Sprintf("%s-resp", topic), // name
 		false,                         // durable
@@ -166,7 +195,7 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 			Counter: globalCounter,
 			Buffer: primitive.Binary{
 				Subtype: 0,
-				Data:    getPayload(currentByteSize),
+				Data:    getPayload(payloadByteSize),
 			},
 		}
 		b, err := bson.Marshal(payload)
@@ -180,14 +209,28 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 			false,           // mandatory
 			false,           // immediate
 			amqp.Publishing{
-				ContentType: "bson",
-				Body:        b,
+				DeliveryMode: 0,
+				ContentType:  "bson",
+				Body:         b,
 			})
 		failOnError(err, "Failed to publish a message")
 
+		sampleTime := time.Now().UnixMilli()
 		// calculate latency
 		sampleCounter++
-		latency = latency + (time.Now().UnixMilli() - startTS)
+		latency = latency + (sampleTime - startTS)
+
+		payloadPacketSent++
+		payloadSizeSent = payloadSizeSent + int64(len(b))
+		// throughput
+		if sampleTime-payloadLastTS >= 1000 {
+			// sample throughput
+			payloadSizeMeanSample++
+			payloadSizeMean = payloadSizeMean + (float64(payloadSizeSent) / float64(payloadPacketSent))
+			payloadSizeSent = 0
+			payloadPacketSent = 0
+			payloadLastTS = sampleTime
+		}
 	}
 	err = ch.Publish(
 		"input-gateway", // exchange
@@ -196,17 +239,21 @@ func producer(conn *amqp.Connection, topic string, counter int, payloadByteSize 
 		false,           // immediate
 		amqp.Publishing{
 			ContentType:   "bson",
-			CorrelationId: strconv.FormatInt(currentByteSize, 10),
+			CorrelationId: strconv.FormatInt(payloadByteSize, 10),
 			ReplyTo:       q.Name,
 			Body:          []byte("END-ITERATION"),
 		})
 	failOnError(err, "Failed to declare a queue")
 	//get response
 	for d := range resp {
-		if strconv.FormatInt(currentByteSize, 10) == d.CorrelationId {
+		if strconv.FormatInt(payloadByteSize, 10) == d.CorrelationId {
 			_ = json.Unmarshal(d.Body, &statistic)
 			break
 		}
+	}
+	statistic.ProducerThroughputMean = float64(payloadSizeMean) / float64(payloadSizeMeanSample)
+	if math.IsNaN(statistic.ProducerThroughputMean) {
+		statistic.ProducerThroughputMean = 0
 	}
 	statistic.ProducerLatency = float64(latency) / float64(globalCounter)
 	statistic.ProducerSentPacket = globalCounter
@@ -234,9 +281,11 @@ func failOnError(err error, msg string) {
 type Statistic struct {
 	ProducerLatency        float64
 	ProducerSentPacket     int64
+	ProducerThroughputMean float64
 	ConsumerLatency        float64
 	ConsumerLostPacket     int64
 	ConsumerReceivedPacket int64
+	ConsumerThroughputMean float64
 }
 
 type PlotInfo struct {
@@ -284,13 +333,15 @@ func ExecuteTest(config *TestConfig) {
 		var meanPLat = float64(0)
 		for i, stat := range threadOutput {
 			fmt.Printf(
-				"Index: %d plat: %f ptot: %d clat: %f, clos: %d, ctot: %d\n",
+				"Index: %d, plat: %f, ptot: %d, pthroughput: %s/sec, clat: %f, clos: %d, ctot: %d, cthroughput: %s/sec\n",
 				i,
 				stat.ProducerLatency,
 				stat.ProducerSentPacket,
+				ByteCountSI(int64(stat.ProducerThroughputMean)),
 				stat.ConsumerLatency,
 				stat.ConsumerLostPacket,
 				stat.ConsumerReceivedPacket,
+				ByteCountSI(int64(stat.ConsumerThroughputMean)),
 			)
 			meanPLat = meanPLat + stat.ProducerLatency
 			meanCLat = meanCLat + stat.ConsumerLatency
